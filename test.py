@@ -109,11 +109,13 @@ def main():
     print("Labels:\n", labels)
     print("No of vehicles: ", len(scores))
 
-    #draw boxes
-    image = Image.open(IMAGE_PATH)
+    #time estimation
     time_estimator = TimeEstimatorAI()
     predicted_time = time_estimator.predict_time(len(scores))
     print("time: " ,predicted_time)
+
+    #draw boxes
+    image = Image.open(IMAGE_PATH)
     draw_boxes(image, boxes, scores, labels, CLASS_NAMES)
 
 
