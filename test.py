@@ -7,6 +7,17 @@ import matplotlib.pyplot as plt
 import matplotlib.patches as patches
 from sklearn.tree import DecisionTreeRegressor
 
+#estimates green light time based on vehicle count
+class TimeEstimatorAI:
+    def __init__(self):
+        #pre-trained regression sim
+        self.model = DecisionTreeRegressor()
+        self.model.fit([[0], [1], [2], [3], [4], [5]], [0, 5, 10, 15, 20, 25])  #vehicle count to time mapping
+
+    def predict_time(self, num_vehicles):
+        estimated_time = self.model.predict(np.array([[num_vehicles]]))
+        return estimated_time[0]
+
 #define the model and loading function
 def load_model(model_path):
     #load model
