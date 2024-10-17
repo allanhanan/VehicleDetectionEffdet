@@ -10,9 +10,8 @@ from sklearn.tree import DecisionTreeRegressor
 #estimates green light time based on vehicle count
 class TimeEstimatorAI:
     def __init__(self):
-        #pre-trained regression sim
         self.model = DecisionTreeRegressor()
-        self.model.fit([[0], [1], [2], [3], [4], [5]], [0, 5, 10, 15, 20, 25])  #vehicle count to time mapping
+        self.model.fit([[0], [9], [11], [15], [17], [20]], [0, 5, 10, 15, 20, 25])
 
     def predict_time(self, num_vehicles):
         estimated_time = self.model.predict(np.array([[num_vehicles]]))
@@ -22,13 +21,13 @@ class TimeEstimatorAI:
 def load_model(model_path):
     #load model
     model = create_model('tf_efficientdet_lite3', pretrained=True, num_classes=6)
-    
+
     #load state of model
     state_dict = torch.load(model_path, map_location='cpu')
-    
+
     #load into model
     model.load_state_dict(state_dict)
-    
+
     model.eval()
     return model
 
@@ -40,26 +39,39 @@ def preprocess_image(image_path, input_size):
         transforms.ToTensor(),
         transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
     ])
-    return transform(image).unsqueeze(0)  #add bat dim
+    return transform(image).unsqueeze(0) #add bat dim
 
-#draw bboxes
-def draw_boxes(image, boxes, scores, labels, class_names):
-    fig, ax = plt.subplots(1, figsize=(12, 9))
-    ax.imshow(image)
+#draw bboxes(fail)
+def draw_boxes(images, boxes_list, scores_list, labels_list, class_names, num_vehicles_list, total_vehicles, traffic_signal):
+    rows = 2
+    cols = 2
+    fig, axs = plt.subplots(rows, cols, figsize=(10, 10))
 
-    for box, score, label in zip(boxes, scores, labels):
-        box = [int(x) for x in box]
-        rect = patches.Rectangle((box[0], box[1]), box[2] - box[0], box[3] - box[1], linewidth=1, edgecolor='r', facecolor='none')
-        ax.add_patch(rect)
-        plt.text(box[0], box[1], f'{class_names[label]}: {score:.2f}', bbox=dict(facecolor='yellow', alpha=0.5))
+    for i, (image, boxes, scores, labels) in enumerate(zip(images, boxes_list, scores_list, labels_list)):
+        ax = axs[i // cols, i % cols]
+        ax.imshow(image)
+        for box, score, label in zip(boxes, scores, labels):
+            box = [int(x) for x in box]
+            rect = patches.Rectangle((box[0], box[1]), box[2] - box[0], box[3] - box[1],
+                                     linewidth=1, edgecolor='r', facecolor='none')
+            ax.add_patch(rect)
+            ax.text(box[0], box[1], f'{class_names[label]}: {score:.2f}',
+                    bbox=dict(facecolor='yellow', alpha=0.5))
+        
+        ax.set_title(f'Signal {i + 1}\nVehicles Detected: {num_vehicles_list[i]}\n'
+                     f'Red Light: {traffic_signal.red_durations[i]}\n'
+                     f'Yellow Light: {traffic_signal.yellow_durations[i]}\n'
+                     f'Green Light: {traffic_signal.green_durations[i]}')
+        ax.axis('off')
 
+    plt.tight_layout()
+    plt.suptitle(f'Total Vehicles: {total_vehicles}', y=1.02)
     plt.show()
 
 #reshape, pading, trimming, parse predictions from model output
-def process_predictions(predictions, threshold=0.5):
+def process_predictions(predictions, threshold=1):
     global CLASS_NAMES
     boxes, scores, labels = [], [], []
-
 
     bbox_preds, class_preds = predictions
     
@@ -83,42 +95,87 @@ def process_predictions(predictions, threshold=0.5):
 
     return final_boxes, final_scores, final_labels
 
+class TrafficSignal:
+    def __init__(self):
+        self.green_durations = []
+        self.yellow_durations = []
+        self.red_durations = []
+
+    def predict_green_light_duration(self, vehicle_count):
+        return max(5, min(30, vehicle_count * 2))
+
+    def calculate_signal_durations(self, vehicle_counts):
+        for i in range(len(vehicle_counts)):
+            if i == 0:
+                T_g = self.predict_green_light_duration(vehicle_counts[i])
+                T_y = 5
+                T_r = 0
+            else:
+                T_r = self.yellow_durations[i - 1] + self.green_durations[i - 1] + (self.red_durations[i - 1] if i > 1 else 0)
+                T_y = 5
+                T_g = self.predict_green_light_duration(vehicle_counts[i])
+
+            self.green_durations.append(T_g)
+            self.yellow_durations.append(T_y)
+            self.red_durations.append(T_r)
+
+    def display_timings(self):
+        for i in range(len(self.green_durations)):
+            print(f"Signal {i + 1}:")
+            print(f"  Red Light Duration: {self.red_durations[i]}")
+            print(f"  Yellow Light Duration: {self.yellow_durations[i]}")
+            print(f"  Green Light Duration: {self.green_durations[i]}")
+            print()
+
 def main():
     global CLASS_NAMES
-    MODEL_SAVE_PATH = '/model/path/efficientdet.pth'
-    IMAGE_PATH = '/test/image/path/.jpg'
+    MODEL_SAVE_PATH = '/home/allan/project/sih/efficientdet.pth'
+    IMAGE_PATHS = ['/home/allan/project/sih/tes.jpg', 
+                   '/home/allan/project/sih/te2s.jpg', 
+                   '/home/allan/project/sih/te3s.jpg', 
+                   '/home/allan/project/sih/te4s.jpg']
     INPUT_SIZE = 512
-    CLASS_NAMES = ['car', 'bike', 'truck', 'rickshaw', 'cart', 'ambulance']
-
+    CLASS_NAMES = ['car', 'cart', 'truck', 'rickshaw', 'bike', 'ambulance']
+    THRESHOLDS = [1.1182, 1.0, 1.315, 1.172]
 
     model = load_model(MODEL_SAVE_PATH)
     print("Model loaded")
-    
- 
-    image_tensor = preprocess_image(IMAGE_PATH, INPUT_SIZE)
-    
-    #debug
-    with torch.no_grad():
-        predictions = model(image_tensor)
-        print("Inference done")
-    
-    #prediction
-    boxes, scores, labels = process_predictions(predictions, threshold=214)
-    print("Boxes:\n", boxes)
-    print("Scores:\n", scores)
-    print("Labels:\n", labels)
-    print("No of vehicles: ", len(scores))
 
-    #time estimation
     time_estimator = TimeEstimatorAI()
-    predicted_time = time_estimator.predict_time(len(scores))
-    print("time: " ,predicted_time)
+    images = []
+    boxes_list, scores_list, labels_list, num_vehicles_list = [], [], [], []
 
-    #draw boxes
-    image = Image.open(IMAGE_PATH)
-    draw_boxes(image, boxes, scores, labels, CLASS_NAMES)
+    vehicle_counts = []
 
+    for i, image_path in enumerate(IMAGE_PATHS):
+        image_tensor = preprocess_image(image_path, INPUT_SIZE)
+        
+        with torch.no_grad():
+            predictions = model(image_tensor)
+            print(f"Inference done for {image_path}")
+
+        boxes, scores, labels = process_predictions(predictions, threshold=THRESHOLDS[i])
+        num_vehicles = len(scores)
+        vehicle_counts.append(num_vehicles)
+        print(f"No of vehicles in {image_path}: {num_vehicles}")
+
+        # Print boxes, scores, and labels for debugging
+        print(f"Boxes for {image_path}: {boxes}")
+        print(f"Scores for {image_path}: {scores}")
+        print(f"Labels for {image_path}: {labels}")
+
+        images.append(Image.open(image_path))
+        boxes_list.append(boxes)
+        scores_list.append(scores)
+        labels_list.append(labels)
+        num_vehicles_list.append(num_vehicles)
+
+
+    traffic_signal = TrafficSignal()
+    traffic_signal.calculate_signal_durations(vehicle_counts)
+    traffic_signal.display_timings()
+
+    draw_boxes(images, boxes_list, scores_list, labels_list, CLASS_NAMES, num_vehicles_list, sum(vehicle_counts), traffic_signal)
 
 if __name__ == '__main__':
     main()
-
