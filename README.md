@@ -1,4 +1,4 @@
-## Vehicle detection made with EfficientDet using pyTorch
+## Vehicle detection made with EfficientDet 
 Classifies vehicles into 6 classes
 
 Train model using images and COCO annotations (Made using labelimg and converted voc to COCO)
